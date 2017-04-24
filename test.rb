@@ -40,18 +40,19 @@ def tag_close(e) e.children.empty? ? "" : comment("</#{e.name}>") end
 def prev_comment(el)
   ret = ""
   id = el.attributes['id']
-  children = el.parent.children
-  children.to_a.each_with_index do |e, i|
+  bros = el.parent.children
+  bros.each_with_index do |e, i|
     if (e.class == REXML::Element && e.attributes['id'] == id && i > 0) then
       for j in 0..i-1
-        child = children[i-j-1]
-        case child
+        brother = bros[i-j-1]
+        case brother
         when REXML::Comment then
-          ret = child.to_s.strip + "\n" + ret
+          ret = brother.to_s.strip + "\n" + ret
         when REXML::Element then
           break
         end
       end
+      return ret
     end
   end
   return ret
@@ -115,8 +116,8 @@ def create_query(e, instr, model)
     refsql = e.root_node.elements["mapper/sql[@id='#{refid}']"]
     if refsql then
       ret += comment("#{e.to_s} : start")
-      ret += create_query(e.root_node.elements["mapper/sql[@id='#{refid}']"], instr, model) + "\n"
-      ret += comment("#{e.to_s} : end")
+      ret += create_query(refsql, instr, model) + "\n"
+      ret += comment("end : refid='#{refid}'")
     else
       ret += "/* ######### Not found. refid=\"#{refid}\" ######### */"
     end
@@ -147,19 +148,19 @@ def create_query(e, instr, model)
       tempstr = c.value
       pos = 0
       while match = tempstr.match(regex, pos) do
-        index = tempstr.index(match[0])
-        if model.bind.include? match[:param_full]  then
+        index = tempstr.index(match[0], pos)
+        if model.bind.include? match[:param_full] then
           after = model.bind[match[:param_full]]
         else
           after = "@#{match[:param] ? match[:param] : match[:param_full]}"
         end
         after += " #{comment(match[0])}"
-        tempstr = tempstr.sub(match[0], after)
+        tempstr = tempstr[0,pos] + tempstr[pos, tempstr.size].sub(match[0], after)
         param_full = match[:param_full]
         if e.name == "foreach" then
           param_full = param_full.sub(e.attributes["item"], e.attributes["collection"]).sub(/(#{e.attributes["collection"]})\./im, '\1_')
         end
-        if !model.bind.include? match[:param_full]  then
+        if !model.bind.include? match[:param_full] then
           model.params.add(param_full)
         end
         pos = index + after.size
