@@ -6,9 +6,92 @@ console = {
 };
 log = console.log;
 
+if (typeof Object.assign != 'function') {
+  (function () {
+    Object.assign = function (target) {
+      if (target === null) {
+        throw new TypeError('Cannot convert undefined or null to object');
+      }
+      var output = {};
+      for (var index = 1; index < arguments.length; index++) {
+        var source = arguments[index];
+        if (source != null) {
+          for (var nextKey in source) {
+            if (source.hasOwnProperty(nextKey)) {
+              output[nextKey] = source[nextKey];
+            }
+          }
+        }
+      }
+      return output;
+    };
+  })();
+}
+
+
+
 if (!Number.hasKey("MAX_SAFE_INTEGER")) {
      Number.MAX_SAFE_INTEGER = Math.pow(2, 53) - 1;
 }
+
+if (!Array.hasKey("isArray")) {
+	 Array.isArray = function(arg) {
+	 	function existsIndex(arg) {
+			for (var i = 0, len = arg.length; i < len; i++) {
+				if ((typeof arg[i]) === "undefined") return false;
+			}
+			return true;
+		}
+		if (!(arg && (typeof arg) === 'object')) return false;
+//		if (/^(\[object \w+\],?)+$/.test(arg.toString())) return false;
+
+	 	return
+			arg.hasKey("length") && (typeof arg.length) === 'number' && existsIndex(arg)
+			&& arg.hasKey("splice") && (typeof arg.splice) === 'function';
+	 };
+}
+String.prototype.quart = function(q) {
+	return q + this + q;
+};
+
+Object.prototype.toJSON = function() {
+	function toStr(obj) {
+		var ary = [];
+		var props = obj.getProperties();
+		for (var i = 0; i < props.length; i++) {
+			var key = props[i];
+			var tmp = getValue(obj[key]);
+			ary.push(key.quart('"') + ':' + tmp);
+		}
+		return '{' + ary.join(',') + '}';
+	};
+	function getValue(val) {
+		if (Array.isArray(val)) {
+			var ary = [];
+			for (var i = 0; i < val.length; i++) {
+				ary.push(getValue(val[i]));
+			}
+			return '[' + ary.join(',') + ']';
+		} else if ((typeof val) === 'object') {
+			if (/^\[object \w+\]$/.test(val.toString())) {
+				return toStr(val);
+			} else if (val.hasKey('valueOf') && !val.hasKey('getDate')) {
+				return val.valueOf().toString();
+			};
+			return val.toString().quart('"');
+		} else if ((typeof val) === 'string') {
+			return val.quart('"');
+		} else if ((typeof val) === 'null' || (typeof val) === 'undefined') {
+			return (typeof val);
+		} else if ((typeof val) === 'number' || (typeof val) === 'boolean') {
+			return val;
+		}
+		return toStr(val);
+	}
+
+	return getValue(this);
+};
+Array.prototype.toJSON = Object.prototype.toJSON;
 
 /** 先頭を大文字化 */
 String.prototype.capitalize = function(){
@@ -16,10 +99,10 @@ String.prototype.capitalize = function(){
 };
 /** キャメルケース変換 */
 String.prototype.toCamelCase = function() {
-	var replacerToCamelCase = function(match, p1) {
+	var f = function(match, p1) {
 		return p1.toUpperCase();
 	};
-	return this.toLowerCase().replace(/[ +_](\w)/gi, replacerToCamelCase);
+	return this.toLowerCase().replace(/[ +_](\w)/gi, f);
 };
 
 /** XMLコメント化 */
@@ -109,7 +192,105 @@ if ( !Array.hasKey("forEach") ) {
 }
 if ( !Strings.hasKey("forEach") ) Strings.prototype.forEach = Array.prototype.forEach;
 
+// Production steps of ECMA-262, Edition 5, 15.4.4.19
+// Reference: http://es5.github.io/#x15.4.4.19
+if (!Array.hasKey("map")) {
+  Array.prototype.map = function(callback, thisArg) {
+    var T, A, k;
+    if (this == null) {
+      throw new TypeError(' this is null or not defined');
+    }
+    // 1. Let O be the result of calling ToObject passing the |this| 
+    //    value as the argument.
+    var O = this;
+    // 2. Let lenValue be the result of calling the Get internal 
+    //    method of O with the argument "length".
+    // 3. Let len be ToUint32(lenValue).
+    var len = O.length >>> 0;
+    // 4. If IsCallable(callback) is false, throw a TypeError exception.
+    // See: http://es5.github.com/#x9.11
+//    if (typeof callback !== 'function') {
+//      throw new TypeError(callback + ' is not a function');
+//    }
+    // 5. If thisArg was supplied, let T be thisArg; else let T be undefined.
+    if (arguments.length > 1) {
+      T = thisArg;
+    }
+    // 6. Let A be a new array created as if by the expression new Array(len) 
+    //    where Array is the standard built-in constructor with that name and 
+    //    len is the value of len.
+    A = new Array(len);
+    // 7. Let k be 0
+    k = 0;
+    // 8. Repeat, while k < len
+    while (k < len) {
+      var kValue, mappedValue;
+      // a. Let Pk be ToString(k).
+      //   This is implicit for LHS operands of the in operator
+      // b. Let kPresent be the result of calling the HasProperty internal 
+      //    method of O with argument Pk.
+      //   This step can be combined with c
+      // c. If kPresent is true, then
+//      if (k in O) {
+        // i. Let kValue be the result of calling the Get internal 
+        //    method of O with argument Pk.
+        kValue = O[k];
+        // ii. Let mappedValue be the result of calling the Call internal 
+        //     method of callback with T as the this value and argument 
+        //     list containing kValue, k, and O.
+        mappedValue = callback.call(T, kValue, k, O);
+        // iii. Call the DefineOwnProperty internal method of A with arguments
+        // Pk, Property Descriptor
+        // { Value: mappedValue,
+        //   Writable: true,
+        //   Enumerable: true,
+        //   Configurable: true },
+        // and false.
+        // In browsers that support Object.defineProperty, use the following:
+        // Object.defineProperty(A, k, {
+        //   value: mappedValue,
+        //   writable: true,
+        //   enumerable: true,
+        //   configurable: true
+        // });
+        // For best browser support, use the following:
+        A[k] = mappedValue;
+//      }
+      // d. Increase k by 1.
+      k++;
+    }
+    // 9. return A
+    return A;
+  };
+};
 
+RegExp.prototype.matches = function(str) {
+	var ret = [];
+	var copy = Object.assign({}, this);
+	var tmpLastIndex = 0;
+	this.global = false;
+	while (this.exec(str.slice(tmpLastIndex)) != null) {
+		var mat = {};
+		mat.index = tmpLastIndex + RegExp.index;
+		mat.input = str;
+		mat.lastIndex = tmpLastIndex + RegExp.lastIndex;
+		mat.lastMatch = RegExp.lastMatch;
+		mat.lastParen = RegExp.lastParen;
+		mat.leftContext = str.slice(0, tmpLastIndex) + RegExp.leftContext;
+		mat.rightContext = RegExp.rightContext;
+		for (var i = 0; i < 100; i++) {
+			if (!RegExp.hasKey("$" + i)) break;
+			mat[i] = RegExp["$" + i];
+		}
+		ret.push(mat);
+		tmpLastIndex = mat.lastIndex;
+		if (!copy.global) break;
+	}
+	this.global = copy.global;
+	ret.toJSON = Object.prototype.toJSON;
+
+	return ret;
+};
 
 var frmSql = application.getActiveWindow();
 
@@ -152,7 +333,6 @@ function getSelectedSql() {
 			var idx = tmpSrc.indexOf(e, pos); 
 			ary.push({start : idx, end : idx + e.length - 1});
 		});
-//		log(match);
 		return ary; 
 	}
     function isExclude(list, pos) {
@@ -181,28 +361,40 @@ function getSelectedSql() {
 	return tmpSrc.slice(st, ed).trim();
 }
 
-class ColumnInfo {
-	columnInfoMap = {
-		columnName 		: "columnName",
-		ordinalPosition : "ordinalPosition",
-		isNullable 		: "isNullable",
-		dataType 		: "dataType",
-		columnType 		: "columnType",
-		columnKey 		: "columnKey",
-		columnComment 	: "columnComment"
-	};
-	
-	function ColumnInfo(obj) {
-		columnInfoMap.getKeys().forEach(function(e) {
-			var prop = columnInfoMap[e];
-			this[e] = (obj.hasKey(prop)) ? obj[prop] : null;
-		}, this);
-	}	
+function toJSON() {
+	var obj = {};
+	this.getProperties().forEach(function(e) {
+		obj[e] = this[e];
+	}, this);
+	return obj.toJSON();
+};
+
+class ColumnInfo {	
+	function ColumnInfo(arg) {
+		this.columnName      = arg.columnName;
+		this.ordinalPosition = arg.ordinalPosition;
+		this.isNullable      = arg.isNullable;
+		this.dataType        = arg.dataType;
+		this.columnType      = arg.columnType;
+		this.columnKey       = arg.columnKey;
+		this.columnComment   = arg.columnComment;
+	}
+	toJSON = toJSON;
 };
 
 class TableInfo {
 	tableName;
-	columns = [];
+	alias;
+	isBaseTable;
+	columns;
+	toJSON = toJSON;
+//	function toJSON() {
+//		var obj = {};
+//		this.getProperties().forEach(function(e) {
+//			obj[e] = this[e];
+//		}, this);
+//		return obj.toJSON();
+//	}
 };
 
 function getColumnInfo(schemaName, tableName) {
@@ -241,9 +433,8 @@ function getColumnInfo(schemaName, tableName) {
 	}
     return ary;
 };
+// スキーマ名
 var schemaName = conn.getSchemaName();
-//var columns = getColumnInfo(schemaName, "T_USER");
-
 
 // 入力テスト
 var str = "select a.X_ID as X_ID, 'aaa' as X_HOGE, '(bb)b' as X_FUGA, a.X_NAME as X_NAME, b.X_NAME as X_NAME, exists(select 1 from T_C c where c.X_ID = a.X_ID) as IS_EXISTS\n"  
@@ -329,17 +520,28 @@ for (var i = 0, len = RESERVES.length; i < len; i++) {
 
 var from = clauses["FROM"];
 var r = /(from|join)\s+(\w+)\s+(as\s+)?(\w+)?/gim;
+
 var a = "T_USER u\n inner join T_HOGE h\n on u.ID = h.ID";
-var match = r.exec("from " + a);
-log(match);
-log(RegExp.$1);
-log(RegExp.$2);
-log(RegExp.$3);
-match = r.exec("from " + a);
-log(match);
-log(RegExp.$1);
-log(RegExp.$2);
-log(RegExp.$3);
+var matches = r.matches("from " + from);
+log(matches.toJSON());
+var tableList = r.matches("from " + from).map(function(m) {
+	var t = new TableInfo();
+	var tmp = {
+		tableName: m[2],
+		alias: m[4],
+		isBaseTable: (m[1].toUpperCase() === "FROM")
+	};
+	t.tableName = tmp.tableName;
+	t.alias = tmp.alias;
+	t.isBaseTable = tmp.isBaseTable;
+	t.columns = getColumnInfo(schemaName, t.tableName);
+//	t.columns.forEach(function(e) {
+//		e.table = t;
+//	})
+	return t;
+});
+
+log(tableList.toJSON());
 
 /** sql_id 生成 */
 function createSqlId(name) {
