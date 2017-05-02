@@ -28,8 +28,6 @@ if (typeof Object.assign != 'function') {
   })();
 }
 
-
-
 if (!Number.hasKey("MAX_SAFE_INTEGER")) {
      Number.MAX_SAFE_INTEGER = Math.pow(2, 53) - 1;
 }
@@ -109,6 +107,10 @@ String.prototype.toCamelCase = function() {
 String.prototype.toXMLComment = function(){
     return "<!-- " + this + " -->";
 };
+
+/** isEmpty */
+Array.prototype.isEmpty    = function() { return this.length === 0; };
+Array.prototype.isNotEmpty = function() { return this.length !== 0; };
 
 // https://tc39.github.io/ecma262/#sec-array.prototype.includes
 if ( !Array.hasKey("includes") ) {
@@ -264,11 +266,94 @@ if (!Array.hasKey("map")) {
   };
 };
 
+/** Filter */
+if (!Array.hasKey("filter")) {
+  Array.prototype.filter = function(fun /*, thisp */) {
+    "use strict";
+
+    if (this == null) throw new TypeError();
+
+    var t = this,
+        len = t.length >>> 0;
+
+    if ((typeof fun) != "function") throw new TypeError();
+
+    var res = [],
+        thisp = arguments[1];
+
+    for (var i = 0; i < len; i++) {
+//      if (i in t) {
+        var val = t[i]; // fun が this を変化させた場合に備えて
+        if (fun.call(thisp, val, i, t)) res.push(val);
+//      }
+    }
+
+    return res;
+  };
+}
+
+/** FilterOne */
+Array.prototype.filterOne = function(fun, dflt) {
+	var res = this.filter(fun);
+	if (res.length === 0) {
+		return (dflt) ? dflt : null;
+	}
+	return res[0];
+};
+
+/** select */
+Array.prototype.select = function(cond) {
+	if (!cond) return this;
+	if ((typeof cond) !== 'object') return [];
+	return this.filter(function (e) {
+		var bool = true;
+		cond.getProperties().forEach(function (key) {
+			if (!e.hasKey(key) || (typeof e[key]) !== (typeof cond[key]) || e[key] !== cond[key]) {
+				bool = false;
+			}
+		});
+		return bool;
+	});
+};
+
+/** selectOne */
+Array.prototype.selectOne = function(cond, dflt) {
+	var res = this.select(cond);
+	if (res.length === 0) {
+		return (dflt) ? dflt : null;
+	}
+	return res[0];
+};
+
+/** some */
+if (!Array.hasKey("some")) {
+  Array.prototype.some = function(fun /*, thisp */) {
+
+    if (this == null) throw new TypeError();
+
+    var t = this,
+        len = t.length >>> 0;
+
+    if ((typeof fun) != "function") throw new TypeError();
+
+    var thisp = arguments[1];
+
+    for (var i = 0; i < len; i++) {
+      if (fun.call(thisp, t[i], i, t))
+        return true;
+    }
+
+    return false;
+  };
+}
+
+/** 正規表現matchを配列で返す. */
 RegExp.prototype.matches = function(str) {
 	var ret = [];
 	var copy = Object.assign({}, this);
 	var tmpLastIndex = 0;
 	this.global = false;
+//	log("str=" + str);
 	while (this.exec(str.slice(tmpLastIndex)) != null) {
 		var mat = {};
 		mat.index = tmpLastIndex + RegExp.index;
@@ -287,30 +372,194 @@ RegExp.prototype.matches = function(str) {
 		if (!copy.global) break;
 	}
 	this.global = copy.global;
-	ret.toJSON = Object.prototype.toJSON;
 
 	return ret;
 };
 
-var frmSql = application.getActiveWindow();
-
-if (frmSql.formType != "A5SqlEditor") {
-	alert("アクティブウィンドウをSQLエディタにしてから実行してください。(1)");
-	exit();
+/** 基底クラス */
+class MyObj {
+	toJSON = toJSON;
 }
 
-var conn = application.dbTree.getSelectedDatabaseConnection();
-if (!conn) {
-	alert("データベースツリーから接続して下さい。");
-	exit();
+/** カラム情報 */
+class ColumnInfo extends MyObj {
+	columnName; dataType; ordinalPosition; isNullable; dataType; columnType; columnKey; columnComment;
+	
+	/** コンストラクタ */
+	function ColumnInfo(arg) {
+		if ((typeof arg) !== 'object') return;
+		this.columnName      = arg.columnName;
+		this.ordinalPosition = arg.ordinalPosition;
+		this.isNullable      = arg.isNullable;
+		this.dataType        = arg.dataType;
+		this.columnType      = arg.columnType;
+		this.columnKey       = arg.columnKey;
+		this.columnComment   = arg.columnComment;
+	}
+
+	function javaTypeMap() {
+		return {
+			CHAR: "String",
+			VARCHAR: "String",
+			LONGVARCHAR: "String",
+			TINYTEXT: "String",
+			TEXT: "String",
+			MEDIUMTEXT: "String",
+			LONGTEXT: "String",
+			NUMERIC: "BigDecimal",
+			DECIMAL: "BigDecimal",
+			BIT: "Boolean",
+			BOOL: "Boolean",
+			BOOLEAN: "Boolean",
+			TINYINT: "Byte",
+			SMALLINT: "Short",
+			MEDIUMINT: "Integer",
+			INT: "Integer",
+			INTEGER: "Integer",
+			BIGINT: "Long",
+			REAL: "Float",
+			FLOAT: "Float",
+			DOUBLE: "Double",
+			BINARY: "Byte[]",
+			VARBINARY: "Byte[]",
+			LONGVARBINARY: "Byte[]",
+			DATE: "Date",
+			YEAR: "Date",
+			TIME: "Time",
+			TIMESTAMP: "Timestamp",
+			TINYBLOB: "Byte[]",
+			BLOB: "Byte[]",
+			MEDIUMBLOB: "Byte[]",
+			LONGBLOB: "Byte[]"
+		};
+	}
+	
+	function toJavaType() {
+		if ((typeof this.dataType) !== 'string') return null;
+		if (this.columnType === 'tinyint(1)') return 'Boolean'; 
+		return this.javaTypeMap()[this.dataType.toUpperCase()];
+	}
+	
+};
+
+/** テーブル情報 */
+class TableInfo extends MyObj {
+	tableName; alias; isBaseTable; columns = [];
+
+	function get(columnName) {
+		return this.columns.selectOne({columnName: columnName}, new ColumnInfo());
+	}
+	
+	function exists(columnName) {
+		return !!get(columnName).columnName;
+	}
+};
+
+/** テーブルリスト */
+class TableList extends MyObj {
+	tables = [];
+	
+	function TableList(tables) {
+		if (!Array.isArray(tables)) return;
+		this.tables = tables;
+	}
+	
+	function get(tableName) {
+		return this.tables.selectOne({tableName: tableName}, new TableInfo());
+	}
+
+	function exists(tableName) {
+		return !!get(tableName).tableName;
+	}
+	
+	function getByAlias(alias) {
+		return this.tables.selectOne({alias: alias}, new TableInfo());
+	}
+} 
+
+/** JSON文字列化 */
+function toJSON(arg) {
+	var target = ((typeof arg) === 'undefined') ? this : arg;
+	if ((typeof target) !== 'object') return target; 
+	var obj = {};
+	target.getProperties().forEach(function(e) {
+		obj[e] = target[e];
+	}, target);
+	return obj.toJSON.call(target);
+};
+
+/** Range */
+class Range extends MyObj {
+	start; end; type; step; length;
+
+	function Range() {
+		var args = arguments;
+		var start, end, type, step;
+		if (args.length === 1 && (typeof args[0]) === 'string') {
+			var r = /(-?\d+)\s*(,|to|until)\s*(-?\d+)(\s*by\s*(-?\d*))?/i;
+			var matches = r.matches(args[0]);
+			if (matches.length) {
+				m = matches[0];
+				start = m[1];
+				end = m[3];
+				type = m[2];
+				step = m[5];
+			}
+		} else if (args.length > 1) {
+			start = args[0];
+			end = args[1];
+			type = 'until';
+			step = (args.length > 2 && args[2]) ? args[2] : 1;
+		}
+		this.start = parseInt(start);
+		this.end = parseInt(end);
+		this.type = (type && type.toLowerCase() === 'to') ? 'to' : 'until';
+		this.step = (parseInt(step) !== 0) ? parseInt(step) : 1;
+
+		this.isTo = function() {
+			return (type === 'to') ? 1 : 0;
+		};
+		
+		function setLength() {
+			var st = (this.start |0);
+			var ed = (this.end |0);
+			var step = this.step ? (this.step |0) : 1;
+			this.length = Math.max(0, Math.ceil(((ed + isTo()) - st) / this.step));
+		}		
+		setLength();
+	}	
+
+	function inInterval(x) {
+		if (step > 0)
+			return x >= start && x < (end + isTo());
+		else
+			return x <= start && x > (end + isTo());
+	}
+	function toArray() {
+		return new Array(length |0).map(function(_, i) {
+			return start + (step * i);
+		});
+	}
+};
+
+/** 正規表現合致index範囲 */
+class RegExpRanges extends MyObj {
+	input; regexp; ranges = [];
+	function RegExpRanges(input, regexp) {
+		this.input = ((typeof input) === 'string') ? input : "";
+		this.regexp = regexp;
+		this.ranges = regexp.matches(input).map(function(e) { return new Range(e.index, e.lastIndex); });
+	}
+	function inInterval(x) {
+		return ranges.some(function(e) { return e.inInterval(x); });
+	}
 }
 
-var selectedText = frmSql.selectedText;
-var sources = frmSql.source;
+/** 正規表現：文字列リテラル・コメント */
+var REGEX_STR_LITERAL_COMMENT = /(["']).+?\1|\/\*.+?\*\/|--(\*\w+)?\s+.+?\n/gim;
 
-function getSelectedSql() {
-	if (selectedText)
-		return selectedText;
+/** カーソル位置からSQLを取得. */
+function getSqlByPos() {
 
 	var tmpSrc = "";
 	var pos = 0;
@@ -324,36 +573,15 @@ function getSelectedSql() {
 	
 	var st = ed = pos;
 
-	function getExcludeList() {
-		var r = /(["']).+?\1|\/\*.+?\*\/|--\s+[^ ]+\n/gim;
-		var match = r.exec(tmpSrc);
-		var ary = [];
-		match.forEach(function(e){
-			var pos = (ary.length) ? ary[ary.length - 1].end + 1 : 0;
-			var idx = tmpSrc.indexOf(e, pos); 
-			ary.push({start : idx, end : idx + e.length - 1});
-		});
-		return ary; 
-	}
-    function isExclude(list, pos) {
-		var bool = false;
-		list.forEach(function(e) {
-			if (e.start <= pos && pos <= e.end) {
-				bool = true;
-				log("(" + e.start + "," + e.end + ")" + ", pos=" + pos + ", str=" + tmpSrc.slice(e.start, e.end + 1));
-				return;
-			}
-		});
-		return bool;
-	}
-	
-	var excludeList = getExcludeList();
+	var exRanges = new RegExpRanges(tmpSrc, REGEX_STR_LITERAL_COMMENT);
+
 	do {
 		st = tmpSrc.lastIndexOf(";", Math.max(st - 1, 0));
-	} while (isExclude(excludeList, st));
+	} while (exRanges.inInterval(st));
 	do {		
 		ed = tmpSrc.indexOf(";", ed);
-	} while (isExclude(excludeList, ed++));
+	} while (exRanges.inInterval(ed++));
+
     st = (st <= 0) ? 0 : st + 1;
 	ed = (ed < 0) ? tmpSrc.length : ed;
 	
@@ -361,42 +589,8 @@ function getSelectedSql() {
 	return tmpSrc.slice(st, ed).trim();
 }
 
-function toJSON() {
-	var obj = {};
-	this.getProperties().forEach(function(e) {
-		obj[e] = this[e];
-	}, this);
-	return obj.toJSON();
-};
 
-class ColumnInfo {	
-	function ColumnInfo(arg) {
-		this.columnName      = arg.columnName;
-		this.ordinalPosition = arg.ordinalPosition;
-		this.isNullable      = arg.isNullable;
-		this.dataType        = arg.dataType;
-		this.columnType      = arg.columnType;
-		this.columnKey       = arg.columnKey;
-		this.columnComment   = arg.columnComment;
-	}
-	toJSON = toJSON;
-};
-
-class TableInfo {
-	tableName;
-	alias;
-	isBaseTable;
-	columns;
-	toJSON = toJSON;
-//	function toJSON() {
-//		var obj = {};
-//		this.getProperties().forEach(function(e) {
-//			obj[e] = this[e];
-//		}, this);
-//		return obj.toJSON();
-//	}
-};
-
+/** カラム情報取得 */
 function getColumnInfo(schemaName, tableName) {
 	var sql = '
 		select
@@ -433,6 +627,28 @@ function getColumnInfo(schemaName, tableName) {
 	}
     return ary;
 };
+
+
+
+/******************** メイン処理 *****************/
+
+
+var frmSql = application.getActiveWindow();
+
+if (frmSql.formType != "A5SqlEditor") {
+	alert("アクティブウィンドウをSQLエディタにしてから実行してください。(1)");
+	exit();
+}
+
+var conn = application.dbTree.getSelectedDatabaseConnection();
+if (!conn) {
+	alert("データベースツリーから接続して下さい。");
+	exit();
+}
+
+var selectedText = frmSql.selectedText;
+var sources = frmSql.source;
+
 // スキーマ名
 var schemaName = conn.getSchemaName();
 
@@ -441,14 +657,15 @@ var str = "select a.X_ID as X_ID, 'aaa' as X_HOGE, '(bb)b' as X_FUGA, a.X_NAME a
  + " from T_A a inner join T_B b on a.X_ID = b.X_ID and a.X_HOGE_NAME = 'aaa'\n"
  + "where a.X_ID = 23 and a.X_NAME = 'aa' and a.X_HOGE_NAME like '%aaa%' and a.X_VAL >= 12.3 and a.X_FUGA_VALUE < 123 group by a.X_ID having count(*) >= 1 and count(*) <= 3 order by a.X_ID desc, a.X_NAME limit 100 offset 20;";
 
-var str = getSelectedSql();
-
-str = str.trim();
-
+var str = ((selectedText) ? selectedText : getSqlByPos()).trim();
 
 var SQL_TYPE = {SELECT:1, INSERT:2, UPDATE:3, DELETE:4};
 
-var match = (/\w+/gi).exec(str);
+var exRanges = new RegExpRanges(str, REGEX_STR_LITERAL_COMMENT);
+var match = (/\w+/gi).matches(str).filterOne(function(e){
+	return (SQL_TYPE.hasKey(e[0].toUpperCase()) && !exRanges.inInterval(e.index));
+});
+
 var sqlTypeName = (match ? match[0] : "").toUpperCase();
 
 if (!SQL_TYPE.hasKey(sqlTypeName)) {
@@ -515,15 +732,24 @@ for (var i = 0, len = RESERVES.length; i < len; i++) {
 		lastIdx = Math.min(lastIdx, idx[RESERVES[j]]);
 	}
 	clauses[name] = str.slice(idx[name] + name.length, lastIdx).trim();
-	console.log("clauses["+name+"]=" + clauses[name]);
+	log("clauses["+name+"]=" + clauses[name]);
 }
 
-var from = clauses["FROM"];
+//class SqlColumn extends ColumnInfo {
+//	tableAlias; columnAlias;
+//	function SqlColumn(arg) {
+//		if ((typeof arg) !== 'object') return;
+//		this.tableAlias = arg.tableAlias;
+//		this.columnName = arg.columnName;
+//		this.columnAlias = arg.columnAlias;
+//	}
+//}
+
+
+
+var from = clauses["FROM"].replace(REGEX_STR_LITERAL_COMMENT, '');
 var r = /(from|join)\s+(\w+)\s+(as\s+)?(\w+)?/gim;
 
-var a = "T_USER u\n inner join T_HOGE h\n on u.ID = h.ID";
-var matches = r.matches("from " + from);
-log(matches.toJSON());
 var tableList = r.matches("from " + from).map(function(m) {
 	var t = new TableInfo();
 	var tmp = {
@@ -535,23 +761,84 @@ var tableList = r.matches("from " + from).map(function(m) {
 	t.alias = tmp.alias;
 	t.isBaseTable = tmp.isBaseTable;
 	t.columns = getColumnInfo(schemaName, t.tableName);
-//	t.columns.forEach(function(e) {
-//		e.table = t;
-//	})
+
 	return t;
 });
+tableList = new TableList(tableList);
 
 log(tableList.toJSON());
+//log(tableList.get("T_USER").get("AGE").toJavaType());
+//log(tableList.get("T_USER").exists("AGE"));
+
+var selectClause = clauses["SELECT"];
+//log(selectClause);
+
+function getSqlColumns() {
+	return selectClause.split(",").map(function(e) {
+		var str = e.replace(REGEX_STR_LITERAL_COMMENT, '').trim();
+		var r = /^((\w+)\s*\.\s*)?(\w+)(\s+(as\s+)?(\w+))?$/gim;
+		var match = r.matches(str);
+		var m = (match.length) ? match[0] : new Array(7);
+		return {
+			tableAlias: m[2],
+			columnName: m[3],
+			columnAlias: m[6]
+		};
+	}).filter(function(c) {
+		return !!c.columnName;
+	});
+}
+//log(getSqlColumns().toJSON());
+
 
 /** sql_id 生成 */
 function createSqlId(name) {
 	return [name.toCamelCase().capitalize(), "Clause", "Cstm"].join("_");
 }
 
+var sqlColumns = getSqlColumns();
+
+/** Resultモデルフィールド */
+function createResultFields(sqlColumns) {
+	var out = "";
+		out += sqlColumns.map(function(e) {
+			var clm = tableList.getByAlias(e.tableAlias).get(e.columnName);
+			var tmp = "\t" + "/** " + clm.columnComment + " */" +"\n";
+			tmp += "\t" + ['private', clm.toJavaType(), clm.columnName.toCamelCase()].join(' ') + ";" + "\n";  
+			tmp += "\n";
+			return tmp;
+		}).join('');
+	return out;
+}
+var out = createResultFields(sqlColumns);
+log(out);
+
+/** ResultMap 生成 */
+function createResultMap(sqlColumns) {
+	var out = "";
+	var id = "Cstm_ResultMap";
+		out += id.toXMLComment() + "\n";
+		out += '<resultMap id="' + id + '" type="xxxxx">' + "\n";
+		out += sqlColumns.map(function(e) {
+			var clm = tableList.getByAlias(e.tableAlias).get(e.columnName);
+			var tmp = "\t" + '<';
+			tmp += ((clm.columnKey === 'PRI') ? 'id' : 'result')
+			+ ' column="' + clm.columnName 
+			+ '" property="' + clm.columnName.toCamelCase() 
+			+ '" jdbcType="' + clm.dataType.toUpperCase() 
+			+'" />' + "\n";
+			return tmp;
+		}).join('');
+		out += '</resultMap>' + "\n";
+		return out;
+}
+var out = createResultMap(sqlColumns);
+log(out);
+
 var fields = {};
 
 function replaceToParam(str) {
-	// console.log("in =" + str);
+//	log("in =" + str);
 	var ret = str;
 	var r = /(((\w+)(\s+)?\.)?(\w+)\s+?((=)|(<>)|([<>]=?)|(LIKE))\s+)(([\d.]+)|('.*?'))/gim;
 
@@ -619,7 +906,7 @@ for (var i = 0, len = RESERVES.length; i < len; i++) {
 	sqlTag = (name + "句").toXMLComment() + "\n" + sqlTag;
 	out += sqlTag + "\n";
 }
-//console.log(out);
+log(out);
 
 
 // selectタグ
@@ -656,4 +943,4 @@ out = comment + "\n"
 out = out.slice(0, out.length - 1);
 out += "</select>";
 
-// println(out);
+log(out);
